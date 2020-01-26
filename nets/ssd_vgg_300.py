@@ -92,13 +92,15 @@ class SSDNet(object):
     The default image size used to train this network is 300x300.
     """
     default_params = SSDParams(
-        img_shape=(300, 300),
-        num_classes=21,
+        img_shape=(300, 300), #输入尺寸
+        num_classes=21,       #预测类别20+1=21（20类加背景）
         no_annotation_label=21,
+        #获取feature map层
         feat_layers=['block4', 'block7', 'block8', 'block9', 'block10', 'block11'],
         feat_shapes=[(38, 38), (19, 19), (10, 10), (5, 5), (3, 3), (1, 1)],
         anchor_size_bounds=[0.15, 0.90],
         # anchor_size_bounds=[0.20, 0.90],
+        #anchor boxes的大小
         anchor_sizes=[(21., 45.),
                       (45., 99.),
                       (99., 153.),
@@ -111,15 +113,16 @@ class SSDNet(object):
         #               (162., 213.),
         #               (213., 264.),
         #               (264., 315.)],
+        #anchor boxes的aspect ratios
         anchor_ratios=[[2, .5],
                        [2, .5, 3, 1./3],
                        [2, .5, 3, 1./3],
                        [2, .5, 3, 1./3],
                        [2, .5],
                        [2, .5]],
-        anchor_steps=[8, 16, 32, 64, 100, 300],
-        anchor_offset=0.5,
-        normalizations=[20, -1, -1, -1, -1, -1],
+        anchor_steps=[8, 16, 32, 64, 100, 300],#anchor的层
+        anchor_offset=0.5,    #补偿阀值0.5
+        normalizations=[20, -1, -1, -1, -1, -1],#该特征层是否正则，大于零即正则；小于零则否
         prior_scaling=[0.1, 0.1, 0.2, 0.2]
         )
 
@@ -302,12 +305,12 @@ def ssd_feat_shapes_from_net(predictions, default_shapes=None):
             feat_shapes.append(shape)
     return feat_shapes
 
-
-def ssd_anchor_one_layer(img_shape,
-                         feat_shape,
-                         sizes,
-                         ratios,
-                         step,
+#生成一层的anchor boxes
+def ssd_anchor_one_layer(img_shape,    #原始图像shape
+                         feat_shape,   #特征图shape
+                         sizes,        #预设的box size
+                         ratios,       #aspect 比例
+                         step,         #anchor的层
                          offset=0.5,
                          dtype=np.float32):
     """Computer SSD default anchor boxes for one feature layer.
@@ -331,17 +334,52 @@ def ssd_anchor_one_layer(img_shape,
     # y = (y.astype(dtype) + offset) / feat_shape[0]
     # x = (x.astype(dtype) + offset) / feat_shape[1]
     # Weird SSD-Caffe computation using steps values...
+    
+    """
+    #测试中，参数如下
+    feat_shapes=[(38, 38), (19, 19), (10, 10), (5, 5), (3, 3), (1, 1)]
+    anchor_sizes=[(21., 45.),
+                      (45., 99.),
+                      (99., 153.),
+                      (153., 207.),
+                      (207., 261.),
+                      (261., 315.)]
+    anchor_ratios=[[2, .5],
+                       [2, .5, 3, 1./3],
+                       [2, .5, 3, 1./3],
+                       [2, .5, 3, 1./3],
+                       [2, .5],
+                       [2, .5]]
+    anchor_steps=[8, 16, 32, 64, 100, 300]
+    offset=0.5
+    dtype=np.float32
+    feat_shape=feat_shapes[0]
+    step=anchor_steps[0]
+    """
+    #测试中，y和x的shape为（38,38）（38,38）
+    #y的值为
+    #array([[ 0,  0,  0, ...,  0,  0,  0],
+    # [ 1,  1,  1, ...,  1,  1,  1],
+    # [ 2,  2,  2, ...,  2,  2,  2],
+    #   ..., 
+    # [35, 35, 35, ..., 35, 35, 35],
+    # [36, 36, 36, ..., 36, 36, 36],
+    # [37, 37, 37, ..., 37, 37, 37]])
     y, x = np.mgrid[0:feat_shape[0], 0:feat_shape[1]]
+    #测试中y=(y+0.5)×8/300,x=(x+0.5)×8/300
     y = (y.astype(dtype) + offset) * step / img_shape[0]
     x = (x.astype(dtype) + offset) * step / img_shape[1]
 
+    #扩展维度，维度为（38,38,1）
     # Expand dims to support easy broadcasting.
     y = np.expand_dims(y, axis=-1)
     x = np.expand_dims(x, axis=-1)
 
     # Compute relative height and width.
     # Tries to follow the original implementation of SSD for the order.
+    #数值为2+2
     num_anchors = len(sizes) + len(ratios)
+    #shape为（4,）
     h = np.zeros((num_anchors, ), dtype=dtype)
     w = np.zeros((num_anchors, ), dtype=dtype)
     # Add first anchor boxes with ratio=1.
@@ -349,12 +387,15 @@ def ssd_anchor_one_layer(img_shape,
     w[0] = sizes[0] / img_shape[1]
     di = 1
     if len(sizes) > 1:
+        #h[1]=sqrt(21*45)/300
         h[1] = math.sqrt(sizes[0] * sizes[1]) / img_shape[0]
         w[1] = math.sqrt(sizes[0] * sizes[1]) / img_shape[1]
         di += 1
     for i, r in enumerate(ratios):
         h[i+di] = sizes[0] / img_shape[0] / math.sqrt(r)
         w[i+di] = sizes[0] / img_shape[1] * math.sqrt(r)
+    #测试中，y和x shape为（38,38,1）
+    #h和w的shape为（4,）
     return y, x, h, w
 
 
@@ -428,7 +469,7 @@ def ssd_multibox_layer(inputs,
                           tensor_shape(cls_pred, 4)[:-1]+[num_anchors, num_classes])
     return cls_pred, loc_pred
 
-
+#建立ssd网络函数
 def ssd_net(inputs,
             num_classes=SSDNet.default_params.num_classes,
             feat_layers=SSDNet.default_params.feat_layers,
@@ -446,7 +487,9 @@ def ssd_net(inputs,
     #     inputs = tf.transpose(inputs, perm=(0, 3, 1, 2))
 
     # End_points collect relevant activations for external use.
+    #用于收集每一层输出结果
     end_points = {}
+    #用slim建立vgg网络
     with tf.variable_scope(scope, 'ssd_300_vgg', [inputs], reuse=reuse):
         # Original VGG-16 blocks.
         net = slim.repeat(inputs, 2, slim.conv2d, 64, [3, 3], scope='conv1')
@@ -469,8 +512,9 @@ def ssd_net(inputs,
         end_points['block5'] = net
         net = slim.max_pool2d(net, [3, 3], stride=1, scope='pool5')
 
-        # Additional SSD blocks.
+        # Additional SSD blocks.#外加的SSD层
         # Block 6: let's dilate the hell out of it!
+        #输出shape为19×19×1024
         net = slim.conv2d(net, 1024, [3, 3], rate=6, scope='conv6')
         end_points['block6'] = net
         net = tf.layers.dropout(net, rate=dropout_keep_prob, training=is_training)
@@ -504,19 +548,22 @@ def ssd_net(inputs,
         end_points[end_point] = net
 
         # Prediction and localisations layers.
+        #预测和定位
         predictions = []
         logits = []
         localisations = []
         for i, layer in enumerate(feat_layers):
             with tf.variable_scope(layer + '_box'):
+                #接受特征层的输出，生成类别和位置预测
                 p, l = ssd_multibox_layer(end_points[layer],
                                           num_classes,
                                           anchor_sizes[i],
                                           anchor_ratios[i],
                                           normalizations[i])
-            predictions.append(prediction_fn(p))
-            logits.append(p)
-            localisations.append(l)
+            #把每一层的预测收集
+            predictions.append(prediction_fn(p))#prediction_fn为softmax，预测类别
+            logits.append(p)             #概率
+            localisations.append(l)      #预测位置信息
 
         return predictions, localisations, logits, end_points
 ssd_net.default_image_size = 300
